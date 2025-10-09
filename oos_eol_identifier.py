@@ -1,14 +1,17 @@
+import requests
+import base64
+import time
+import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
 import os
 import csv
-
-# Default schema
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 DEFAULT_SETTINGS = {
     "name": "default-router",
     "method": "GET",
-    "url": "https://api.example.com/restapi/v4/orders/",
+    "url": "https://api.virtualstock.com/restapi/v4/orders/",
     "params": {
         "limit": 10,
         "offset": 0,
@@ -34,9 +37,7 @@ DEFAULT_SETTINGS = {
     "username": "your-username",
     "password": "your-password"
 }
-
 SETTINGS_FILE = "settings.json"
-
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -59,14 +60,12 @@ def save_settings():
         messagebox.showinfo("Success", "Settings saved successfully.")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save settings: {e}")
-
 def create_labeled_entry(parent, label_text, row, default_value=""):
     tk.Label(parent, text=label_text).grid(row=row, column=0, sticky="e")
     entry = tk.Entry(parent, width=40)
     entry.insert(0, default_value)
     entry.grid(row=row, column=1)
     return entry
-
 def create_labeled_spinbox(parent, label_text, row, from_, to, default_value):
     tk.Label(parent, text=label_text).grid(row=row, column=0, sticky="e")
     spinbox = tk.Spinbox(parent, from_=from_, to=to, width=10)
@@ -74,22 +73,10 @@ def create_labeled_spinbox(parent, label_text, row, from_, to, default_value):
     spinbox.insert(0, default_value)
     spinbox.grid(row=row, column=1)
     return spinbox
-
 def create_labeled_checkbox(parent, label_text, row, var):
     tk.Checkbutton(parent, text=label_text, variable=var).grid(row=row, column=0, columnspan=2, sticky="w")
-import requests
-import base64
-import time
-import logging
-
-def export_to_csv(orders):
-    if not orders:
-        messagebox.showwarning("No Data", "No orders found for the given part number.")
-        return
-    file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
-    if not file_path:
-        return
-    with open(file_path, mode="w", newline="", encoding="utf-8") as file:
+def export_to_csv(orders, filename):
+    with open(filename, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow([
             "Order Reference", "Order Date", "Status", "Item Name", "Quantity", "Total",
@@ -112,8 +99,6 @@ def export_to_csv(orders):
                 shipping.get("postal_code", ""),
                 shipping.get("country", "")
             ])
-    messagebox.showinfo("Success", f"Orders exported to {file_path}")
-
 def on_fetch_orders():
     part_number = part_entry.get().strip()
     if not part_number:
@@ -160,17 +145,14 @@ class APIClient:
         auth_header = base64.b64encode(auth_string.encode()).decode()
         headers["Authorization"] = f"Basic {auth_header}"
         self.session.headers.update(headers)
-
     def fetch_paginated_data(self, progress_callback=None):
         offset = int(self.settings["params"].get("offset", 0))
         all_results = []
         total_count = None
-
         rpm = int(self.settings.get("requests_per_minute", 60))
         delay = 60 / rpm if self.settings.get("rate_limit_enabled", False) else 0
         batch_size = self.settings.get("batch_size", 10)
         max_retries = self.settings.get("max_retries", 3)
-
         while True:
             self.settings["params"]["offset"] = str(offset)
             for attempt in range(max_retries):
@@ -208,24 +190,17 @@ class APIClient:
             offset += batch_size
             if delay:
                 time.sleep(delay)
-
         return all_results
-# GUI setup
 root = tk.Tk()
 root.title("API Router Settings Editor")
 root.geometry("600x800")
 notebook = ttk.Notebook(root)
 notebook.pack(fill="both", expand=True)
-
 settings_tab = ttk.Frame(notebook)
 notebook.add(settings_tab, text="Settings")
-
 fetch_tab = ttk.Frame(notebook)
 notebook.add(fetch_tab, text="Fetch Orders")
-
 settings = load_settings()
-
-# Settings tab entries
 name_entry = create_labeled_entry(settings_tab, "Name:", 0, settings["name"])
 method_entry = create_labeled_entry(settings_tab, "Method:", 1, settings["method"])
 url_entry = create_labeled_entry(settings_tab, "URL:", 2, settings["url"])
@@ -237,33 +212,26 @@ accept_entry = create_labeled_entry(settings_tab, "Accept:", 7, settings["header
 body_mode_entry = create_labeled_entry(settings_tab, "Body Mode:", 8, settings["body_mode"])
 body_entry = create_labeled_entry(settings_tab, "Body (JSON):", 9, json.dumps(settings["body"]))
 timeout_spin = create_labeled_spinbox(settings_tab, "Timeout:", 10, 1, 60, settings["timeout"])
-
 sort_var = tk.BooleanVar(value=settings["sort_enabled"])
 create_labeled_checkbox(settings_tab, "Enable Sorting", 11, sort_var)
 sort_entry = create_labeled_entry(settings_tab, "Sort Order:", 12, settings["sort"])
-
 status_var = tk.BooleanVar(value=settings["status_enabled"])
 create_labeled_checkbox(settings_tab, "Enable Status Filter", 13, status_var)
 status_entry = create_labeled_entry(settings_tab, "Status:", 14, settings["status"])
-
 rate_var = tk.BooleanVar(value=settings["rate_limit_enabled"])
 create_labeled_checkbox(settings_tab, "Enable Rate Limiting", 15, rate_var)
 rate_spin = create_labeled_spinbox(settings_tab, "Requests/Minute:", 16, 1, 1000, settings["requests_per_minute"])
 batch_spin = create_labeled_spinbox(settings_tab, "Batch Size:", 17, 1, 100, settings["batch_size"])
 retry_spin = create_labeled_spinbox(settings_tab, "Max Retries:", 18, 1, 10, settings["max_retries"])
-
 allow_var = tk.BooleanVar(value=settings["allow_redirects"])
 create_labeled_checkbox(settings_tab, "Allow Redirects", 19, allow_var)
 verify_var = tk.BooleanVar(value=settings["verify"])
 create_labeled_checkbox(settings_tab, "Verify SSL", 20, verify_var)
-
 user_entry = create_labeled_entry(settings_tab, "Username:", 21, settings["username"])
 pass_entry = create_labeled_entry(settings_tab, "Password:", 22, settings["password"])
 client = APIClient(settings)
 fetch_button = ttk.Button(fetch_tab, text="Fetch Orders", command=on_fetch_orders)
 fetch_button.pack(pady=10)
-
-
 def on_save():
     settings["name"] = name_entry.get()
     settings["method"] = method_entry.get()
@@ -293,7 +261,6 @@ def on_save():
     settings["username"] = user_entry.get()
     settings["password"] = pass_entry.get()
     save_settings()
-
 save_button = ttk.Button(settings_tab, text="Save Settings", command=on_save)
 save_button.grid(row=23, column=0, columnspan=2, pady=10)
 progress_label = tk.Label(fetch_tab, text="Click to fetch orders using settings.json")
